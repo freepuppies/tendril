@@ -28,11 +28,11 @@ $alphanum = [$alpha $digit]
 
 tokens :-
   <0>       "@" @id          { beginCommand }
-  <command> "(" @pparam* ")" { commandParameter }
-  <command> "{" @cparam* "}" { commandParameter }
-  <command> $hspace* \n      { endCommand }
+  <command> "(" @pparam+ ")" { commandParameter }
+  <command> "{" @cparam+ "}" { commandParameter }
+  <command> $hspace+ \n      { endCommand }
 
-  <0>       @text+ { text }
+  <0>       @text+           { text }
 
 {
 beginCommand, endCommand, commandParameter, text :: AlexAction Token
