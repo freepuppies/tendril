@@ -9,6 +9,29 @@ common warnings
 executable tendril
     import:           warnings
     main-is:          Main.hs
-    build-depends:    base ^>=4.17.2.1
+    other-modules:
+        Data.Source,
+        Parser.Token,
+        Parser.Error,
+        Parser.Internal,
+        Parser.Lexer
+    build-depends:    
+        base ^>=4.17.2.1,
+        mtl,
+        free,
+        text,
+        bytestring,
+        array,
+        pretty
+    build-tool-depends:
+        alex:alex,
+        happy:happy
+    default-extensions:
+        RecordWildCards,
+        TupleSections,
+        BangPatterns,
+        MultiParamTypeClasses,
+        LambdaCase,
+        OverloadedStrings
     hs-source-dirs:   app
     default-language: Haskell2010
