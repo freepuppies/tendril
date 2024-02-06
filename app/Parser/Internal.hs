@@ -51,11 +51,11 @@ alexGetByte input@AlexInput {..} =
       in 
         Just (byte, input')
   where
-    nextSourcePos (SourcePos o l _) 0x0a = SourcePos o ( l + 1 ) 1
+    nextSourcePos (SourcePos o l _) 0x0a = SourcePos o (l + 1) 1
     nextSourcePos (SourcePos o l c) _ = SourcePos o l $ c + 1
 
 alexEOF :: AlexInput -> Bool
-alexEOF AlexInput{..} = LBS.null aInput
+alexEOF = LBS.null . aInput
 
 alexExcerpt :: AlexInput -> Int -> Int -> T.Text
 alexExcerpt AlexInput{..} offset len = 
