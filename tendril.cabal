@@ -11,18 +11,21 @@ executable tendril
     main-is:          Main.hs
     other-modules:
         Data.Source,
-        Parser.Token,
-        Parser.Error,
-        Parser.Internal,
-        Parser.Lexer
+        Syntax,
+        Syntax.Parser.Token,
+        Syntax.Parser.Error,
+        Syntax.Parser.Internal,
+        Syntax.Parser.Lexer,
     build-depends:    
         base ^>=4.17.2.1,
         mtl,
         free,
         text,
-        bytestring,
         array,
-        pretty
+        bytestring,
+        monad-loops,
+        pretty,
+        dhall
     build-tool-depends:
         alex:alex,
         happy:happy
