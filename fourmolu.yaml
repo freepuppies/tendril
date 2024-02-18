@@ -1,7 +1,7 @@
 indentation: 2
 comma-style: leading 
 import-export-style: leading
-record-brace-space: true 
+record-brace-space: false 
 indent-wheres: true
 respectful: false
 haddock-style: single-line
