@@ -6,6 +6,7 @@ module Syntax.Parser.Lexer
   )
 where 
 
+import Control.Monad
 import Data.ByteString.Lazy qualified as LBS
 import Data.Source
 import Effectful
@@ -52,7 +53,7 @@ tokens :-
   <0> "$$"   { group Tex TcBeginTex TcEndTex }
   <0> "**"   { group Bold TcBeginBold TcEndBold }
   <0> "*"    { group Italics TcBeginItalics TcEndItalics }
-  <0> \n \n+ { group Paragraph TcBeginParagraph TcEndParagraph }
+  <0> \n \n+ { paragraphGroup }
   
   <0> \n     { linebreak }
 
@@ -117,6 +118,18 @@ group parseGroup beginClass endClass _ tokenSpan _ =
     _ -> do
       pushGroup parseGroup
       pure $ Token tokenSpan beginClass 
+
+paragraphGroup :: Lexlet
+paragraphGroup alex tokenSpan _ = 
+  peekGroup >>= \case
+    Just Paragraph -> do
+      alexEof <$> get >>= \case 
+        True -> void popGroup
+        False -> pushToken $ Token tokenSpan TcBeginParagraph
+      pure $ Token tokenSpan TcEndParagraph
+    _ -> do
+      pushGroup Paragraph
+      pure $ Token tokenSpan TcBeginParagraph
 
 scan :: Parse es => Eff es Token
 scan = do
