@@ -11,6 +11,8 @@ executable tendril
     main-is:          Main.hs
     other-modules:
         Data.Source,
+        Syntax,
+        Syntax.Parser,
         Syntax.Parser.Group,
         Syntax.Parser.Error,
         Syntax.Parser.Token,

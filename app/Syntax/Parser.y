@@ -1,0 +1,117 @@
+{
+module Syntax.Parser
+  ( parseFile
+  )
+where 
+
+import Data.ByteString.Lazy qualified as LBS
+import Data.Source
+import Effectful
+import Effectful.Error.Static
+import Effectful.State.Static.Local
+import Syntax
+import Syntax.Parser.Error
+import Syntax.Parser.Internal
+import Syntax.Parser.Token
+import Syntax.Parser.Lexer
+}
+
+%name parseDocument document 
+
+%tokentype { Token }
+%monad { Parser } { (>>=) } { return }
+%lexer { (next >>=) } { Token _ TcEof }
+%error { parseError }
+%errorhandlertype explist
+
+%token
+  title          { Token _ TcTitle }
+  date           { Token _ TcDate }
+  h1             { Token _ TcH1 }
+  h2             { Token _ TcH2 }
+  h3             { Token _ TcH3 }
+  h4             { Token _ TcH4 }
+  h5             { Token _ TcH5 }
+  h6             { Token _ TcH6 }
+  link           { Token _ TcLink }
+  reference      { Token _ TcReference }
+  transclude     { Token _ TcTransclude }
+  '('            { Token _ TcBeginParameters }
+  '|'            { Token _ TcParameterSeparator }
+  ')'            { Token _ TcEndParameters }
+  beginBold      { Token _ TcBeginBold }
+  endBold        { Token _ TcEndBold }
+  beginItalics   { Token _ TcBeginItalics }
+  endItalics     { Token _ TcEndItalics }
+  beginTex       { Token _ TcBeginTex }
+  endTex         { Token _ TcEndTex }
+  beginParagraph { Token _ TcBeginParagraph }
+  endParagraph   { Token _ TcEndParagraph }
+  linebreak      { Token _ TcLinebreak }
+  textLiteral    { Token _ (TcText _) }
+
+%%
+
+list1(p) : p list1(p) { [$1] ++ $2 }
+         | p          { [$1] }
+
+list(p) : list1(p) { $1 }
+        |          { [] }
+
+text : textLiteral { (\(Token tokenSpan (TcText t)) -> Node tokenSpan (NcText t) []) $1 }
+
+command1(p) : p '(' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $4) nc [$3] }
+command2(p) : p '(' text '|' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $6) nc [$3, $5] }
+
+command : command1(title)      { $1 NcTitle }
+        | command1(date)       { $1 NcDate }
+        | command1(h1)         { $1 NcH1 }
+        | command1(h2)         { $1 NcH2 }
+        | command1(h3)         { $1 NcH3 }
+        | command1(h4)         { $1 NcH4 }
+        | command1(h5)         { $1 NcH5 }
+        | command1(h6)         { $1 NcH6 }
+        | command2(link)       { $1 NcLink }
+        | command1(link)       { $1 NcLink }
+        | command2(reference)  { $1 NcReference }
+        | command1(reference)  { $1 NcReference }
+        | command2(transclude) { $1 NcTransclude }
+        | command1(transclude) { $1 NcTransclude }
+
+bold : beginBold scripts1 endBold { Node (tokenSpan $1 <> tokenSpan $3) NcBold $2 }
+italics : beginItalics scripts1 endItalics { Node (tokenSpan $1 <> tokenSpan $3) NcItalics $2 }
+tex : beginTex scripts1 endTex { Node (tokenSpan $1 <> tokenSpan $3) NcTex $2 }
+
+script : bold    { $1 }
+       | italics { $1 }
+       | tex     { $1 }
+       | text    { $1 }
+scripts1 : list1(script) { $1 }
+
+paragraphItem : script               { $1 }
+              | command2(link)       { $1 NcLink }
+              | command1(link)       { $1 NcLink }
+              | command2(reference)  { $1 NcReference }
+              | command1(reference)  { $1 NcReference }
+paragraph : beginParagraph list1(paragraphItem) endParagraph { Node (tokenSpan $1 <> tokenSpan $3) NcParagraph $2 }
+
+documentItem : command   { $1 }
+             | paragraph { $1 }
+
+document : list(documentItem) { $1 }
+
+{
+parseError :: (Token, [String]) -> Parser a 
+parseError = throwError . uncurry UnexpectedToken
+
+parseFile 
+  :: (Error ParseError :> es, IOE :> es)
+  => FilePath
+  -> Eff es [Node]
+parseFile path = do
+  input <- liftIO $ LBS.readFile path
+  let 
+    alexInput = AlexInput 0 (SourcePos path 1 1) input
+    parseState = ParseState 0 mempty mempty Nothing
+  evalState parseState $ evalState alexInput $ inject parseDocument
+}

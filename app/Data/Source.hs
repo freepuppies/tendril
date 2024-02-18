@@ -21,6 +21,10 @@ data SourceSpan = SourceSpan
   }
   deriving (Show)
 
+instance Semigroup SourceSpan where
+  (SourceSpan o begin _) <> (SourceSpan o' _ end) =
+    assert (o == o') $ SourceSpan o begin end
+
 mkSourceSpan :: SourcePos -> SourcePos -> SourceSpan
 mkSourceSpan (SourcePos o bl bc) (SourcePos o' el ec) =
   assert (o == o' && ((bl == el && bc <= ec) || (bl < el))) $
