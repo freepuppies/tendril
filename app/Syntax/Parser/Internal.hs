@@ -1,53 +1,52 @@
 module Syntax.Parser.Internal
-  ( AlexAction
-  , AlexInput(..)
-  , ParserState(..)
-  , Parser(..)
-  , alexGetByte
+  ( Parse
+  , Parser
+  , Lexlet
+  , AlexInput (..)
   , alexInputPrevChar
-  , alexEOF
+  , alexGetByte
+  , alexEof
   , alexExcerpt
-  , evalParser
-  , failWith
-  , getAlexInput
-  , getOffset
-  , getStartCode
-  , getTokenBuffer
-  , getSourcePos
-  , getParenDepth
-  , getTextBuffer
-  , setAlexInput
+  , ParseState (..)
   , setStartCode
-  , setParenDepth
-  , modifyParenDepth
-  , modifyTextBuffer
   , pushToken
   , popToken
+  , pushGroup
+  , peekGroup
+  , popGroup
+  , modifyTextBuffer
   , clearTextBuffer
-  ) where
+  )
+where
 
-import           Control.Monad               (liftM, ap)
-import           Control.Monad.State         (MonadState(..), gets, modify)
-import           Control.Exception           (assert)
-import           Data.Int                    (Int64)
-import           Data.Word                   (Word8)
-import           Data.List                   (uncons)
-import           Data.Source                 (SourcePos(..), SourceSpan(..))
-import           Data.Functor                ((<&>))
-import           Data.Bifunctor              (Bifunctor(..))
-import qualified Data.Text            as T
-import qualified Data.Text.Encoding   as T
-import qualified Data.ByteString.Lazy as LBS
-import           Syntax.Parser.Error         (ParseError(..))
-import           Syntax.Parser.Token         (Token)
+import Data.ByteString.Lazy qualified as LBS
+import Data.Functor ((<&>))
+import Data.Int (Int64)
+import Data.Source (SourcePos (..), SourceSpan (..))
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Data.Vector qualified as V
+import Data.Word (Word8)
+import Effectful
+import Effectful.Error.Static
+import Effectful.State.Static.Local
+import Syntax.Parser.Error (ParseError)
+import Syntax.Parser.Group (ParseGroup)
+import Syntax.Parser.Token (Token)
+import Prelude hiding (length)
 
-type AlexAction = AlexInput -> SourceSpan -> Int -> Parser Token
+type Parse es = (State AlexInput :> es, State ParseState :> es, Error ParseError :> es)
+
+type Parser = Eff '[State AlexInput, State ParseState, Error ParseError]
+
+type Lexlet = AlexInput -> SourceSpan -> Int -> Parser Token
 
 data AlexInput = AlexInput
-  { aOffset    :: !Int64
-  , aSourcePos :: !SourcePos
-  , aInput     :: !LBS.ByteString }
-  deriving Show
+  { alexOffset :: !Int64
+  , alexSourcePos :: !SourcePos
+  , alexInput :: !LBS.ByteString
+  }
+  deriving (Show)
 
 alexInputPrevChar :: AlexInput -> Char
 alexInputPrevChar =
@@ -55,119 +54,79 @@ alexInputPrevChar =
   undefined
 
 alexGetByte :: AlexInput -> Maybe (Word8, AlexInput)
-alexGetByte input@AlexInput {..} =
-  case LBS.uncons aInput of
+alexGetByte alex@AlexInput{..} =
+  case LBS.uncons alexInput of
     Nothing -> Nothing
-    Just (byte, aInput') ->
+    Just (byte, alexInput') ->
       let
-        aOffset' = aOffset + 1
-        aSourcePos' = nextSourcePos aSourcePos byte
-        input' = input { aSourcePos = aSourcePos'
-                       , aInput = aInput'
-                       , aOffset = aOffset' }
-      in
-        Just (byte, input')
+        alexOffset' = alexOffset + 1
+        alexSourcePos' = nextSourcePos alexSourcePos byte
+        alex' =
+          alex
+            { alexSourcePos = alexSourcePos'
+            , alexInput = alexInput'
+            , alexOffset = alexOffset'
+            }
+       in
+        Just (byte, alex')
   where
+    -- FIXME: Positions invalid for codepoints larger than 1
     nextSourcePos (SourcePos o l _) 0x0a = SourcePos o (l + 1) 1
     nextSourcePos (SourcePos o l c) _ = SourcePos o l $ c + 1
 
-alexEOF :: AlexInput -> Bool
-alexEOF = LBS.null . aInput
+alexEof :: AlexInput -> Bool
+alexEof = LBS.null . alexInput
 
 alexExcerpt :: AlexInput -> Int -> Int -> T.Text
-alexExcerpt AlexInput{..} offset len =
+alexExcerpt AlexInput{..} offset length =
   T.decodeUtf8
     . LBS.toStrict
     . LBS.drop (fromIntegral offset)
-    $ LBS.take (fromIntegral len) aInput
+    $ LBS.take (fromIntegral length) alexInput
 
-data ParserState = ParserState
-  { pAlexInput       :: !AlexInput
-  , pStartCode       :: !Int
-  , pTokenBuffer     :: ![Token]
-  , pParenDepth      :: !Int
-  , pTextBuffer      :: !(Maybe (SourceSpan, T.Text)) }
-  deriving Show
+data ParseState = ParseState
+  { parseStartCode :: !Int
+  , parseTokenBuffer :: !(V.Vector Token)
+  , parseGroupStack :: !(V.Vector ParseGroup)
+  , parseTextBuffer :: !(Maybe (SourceSpan, T.Text))
+  }
+  deriving (Show)
 
-newtype Parser a = Parser
-  { runParser
-     :: ParserState
-     -> Either ParseError (a, ParserState) }
+setStartCode :: State ParseState :> es => Int -> Eff es ()
+setStartCode code = modify (\ps -> ps{parseStartCode = code})
 
-instance Functor Parser where
-  fmap = liftM
+pushToken :: State ParseState :> es => Token -> Eff es ()
+pushToken token =
+  modify (\ps -> ps{parseTokenBuffer = V.cons token $ parseTokenBuffer ps})
 
-instance Applicative Parser where
-  pure !a = Parser $ Right . (a,)
-  (<*>) = ap
+popToken :: State ParseState :> es => Eff es (Maybe Token)
+popToken =
+  state $ \ps -> case V.uncons $ parseTokenBuffer ps of
+    Just (token, tokenBuffer) ->
+      (Just token, ps{parseTokenBuffer = tokenBuffer})
+    Nothing -> (Nothing, ps)
 
-instance Monad Parser where
-  (Parser p) >>= f = Parser $ \s -> case p s of
-    Right (a, s') -> runParser (f a) s'
-    Left e -> Left e
+pushGroup :: State ParseState :> es => ParseGroup -> Eff es ()
+pushGroup pg =
+  modify (\ps -> ps{parseGroupStack = V.cons pg $ parseGroupStack ps})
 
-instance MonadFail Parser where
-  fail msg = Parser $ \s ->
-    Left $ PeFailure (aSourcePos $ pAlexInput s) msg
+peekGroup :: State ParseState :> es => Eff es (Maybe ParseGroup)
+peekGroup = gets $ (V.!? 0) . parseGroupStack
 
-instance MonadState ParserState Parser where
-  state = Parser . (Right .)
+popGroup :: State ParseState :> es => Eff es (Maybe ParseGroup)
+popGroup =
+  state $ \ps -> case V.uncons $ parseGroupStack ps of
+    Just (pg, groupStack) ->
+      (Just pg, ps{parseGroupStack = groupStack})
+    Nothing -> (Nothing, ps)
 
-evalParser :: Parser a -> ParserState -> Either ParseError a
-evalParser p s = second fst $ runParser p s
+modifyTextBuffer :: State ParseState :> es => SourceSpan -> (T.Text -> T.Text) -> Eff es ()
+modifyTextBuffer sourceSpan@(SourceSpan o _ end) f = do
+  textBuffer <-
+    gets parseTextBuffer <&> \case
+      Just (SourceSpan _ begin _, text) -> (SourceSpan o begin end, f text)
+      Nothing -> (sourceSpan, f mempty)
+  modify $ \ps -> ps{parseTextBuffer = Just textBuffer}
 
-failWith :: ParseError -> Parser a
-failWith = Parser . const . Left
-
-getAlexInput :: Parser AlexInput
-getAlexInput = gets pAlexInput
-
-getOffset :: Parser Int64
-getOffset = gets $ aOffset . pAlexInput
-
-getSourcePos :: Parser SourcePos
-getSourcePos = gets $ aSourcePos . pAlexInput
-
-getStartCode :: Parser Int
-getStartCode = gets pStartCode
-
-getTokenBuffer :: Parser [Token]
-getTokenBuffer = gets pTokenBuffer
-
-getParenDepth :: Parser Int
-getParenDepth = gets pParenDepth
-
-getTextBuffer :: Parser (Maybe (SourceSpan, T.Text))
-getTextBuffer = gets pTextBuffer
-
-setAlexInput :: AlexInput -> Parser ()
-setAlexInput ai = modify $ \s -> s { pAlexInput = ai }
-
-setStartCode :: Int -> Parser ()
-setStartCode sc = modify $ \s -> s { pStartCode = sc }
-
-setParenDepth :: Int -> Parser ()
-setParenDepth d = modify $ \s -> s { pParenDepth = d }
-
-modifyParenDepth :: (Int -> Int) -> Parser ()
-modifyParenDepth f = modify $ \s -> s { pParenDepth = f $ pParenDepth s }
-
-modifyTextBuffer :: SourceSpan -> (T.Text -> T.Text) -> Parser ()
-modifyTextBuffer ss@(SourceSpan o _ end) f = do
-  textBuffer <- getTextBuffer <&> \case
-    Just (SourceSpan o' begin _, text) -> 
-      assert (o == o') (SourceSpan o begin end, f text)
-    Nothing -> (ss, f mempty)
-  modify $ \s -> s { pTextBuffer = Just textBuffer }
-
-pushToken :: Token -> Parser ()
-pushToken t = modify $ \s -> s { pTokenBuffer = t : pTokenBuffer s }
-
-popToken :: Parser (Maybe Token)
-popToken = getTokenBuffer >>= (\case
-  Just (x, xs) ->
-    state (\s -> (Just x, s { pTokenBuffer = xs }))
-  Nothing -> pure Nothing) . uncons
-
-clearTextBuffer :: Parser (Maybe (SourceSpan, T.Text))
-clearTextBuffer = state $ \s -> (pTextBuffer s, s { pTextBuffer = Nothing })
+clearTextBuffer :: State ParseState :> es => Eff es (Maybe (SourceSpan, T.Text))
+clearTextBuffer = state $ \ps -> (parseTextBuffer ps, ps{parseTextBuffer = Nothing})

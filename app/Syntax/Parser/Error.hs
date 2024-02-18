@@ -1,11 +1,13 @@
 module Syntax.Parser.Error
   ( ParseError (..)
-  ) where 
+  )
+where
 
 import Data.Source (SourcePos)
+import Syntax.Parser.Group (ParseGroup)
 
 data ParseError
-  = PeUnexpectedEof SourcePos
-  | PeUnexpectedInput SourcePos
-  | PeFailure SourcePos String
-  deriving Show
+  = UnexpectedEof !SourcePos
+  | UnexpectedInput !SourcePos
+  | UnterminatedGroup !ParseGroup
+  deriving (Show)

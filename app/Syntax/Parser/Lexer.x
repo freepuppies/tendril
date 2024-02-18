@@ -1,210 +1,164 @@
 {
 module Syntax.Parser.Lexer
   ( next
+  , lex
   , lexFile
-  ) where
+  )
+where 
 
-import           Control.Monad.IO.Class
-import           Control.Monad.Loops
-import           Data.Functor
-import           Data.Source
-import qualified Data.Text              as T
-import qualified Data.ByteString.Lazy   as LBS
-import           Syntax.Parser.Error
-import           Syntax.Parser.Token
-import           Syntax.Parser.Internal
+import Data.ByteString.Lazy qualified as LBS
+import Data.Source
+import Effectful
+import Effectful.Error.Static
+import Effectful.State.Static.Local
+import Syntax.Parser.Group
+import Syntax.Parser.Error
+import Syntax.Parser.Internal
+import Syntax.Parser.Token
+import Prelude hiding (length)
 }
 
 %encoding "utf8"
 
-$hwhite      = $white # [\n]
+@special = [\*\(\)\|\$\@]
+@escape = \\ @special
 
-@escape      = \\ [\(\)\|\$\*\@\\]
-@paramelem   = $printable # [\(\)\|] | @escape
-@paramtext   = @paramelem+
-@latexelem   = $printable # [\$] | $white 
-@latex       = @latexelem+
-@italicselem = $printable # [\*] | $white | @escape
-@italics     = @italicselem+
-@boldelem    = $printable # [\*] | $white | @escape
-@bold        = @boldelem+
-@textelem    = $printable # [\@\$\n] | $hwhite | @escape
-@text        = @textelem+
+@paramelem = $printable # [\(\)\|] | @escape
+@param     = @paramelem+
+
+@textelem = $printable # [\*\@\$\n] | @escape 
+@text     = @textelem+
 
 tokens :-
-  <0>                  "@Title"         { beginCommand TcTitle }
-  <0>                  "@Date"          { beginCommand TcDate }
-  <0>                  "@H1"            { beginCommand TcH1 }
-  <0>                  "@H2"            { beginCommand TcH2 }
-  <0>                  "@H3"            { beginCommand TcH3 }
-  <0>                  "@H4"            { beginCommand TcH4 }
-  <0>                  "@H5"            { beginCommand TcH5 }
-  <0>                  "@H6"            { beginCommand TcH6 }
-  <0>                  "@Link"          { beginCommand TcLink }
-  <0>                  "@Reference"     { beginCommand TcReference }
-  <0>                  "@Transclude"    { beginCommand TcTransclude }
-  <0>                  "@Begin"         { beginCommand TcBeginVBlock }
-  <0>                  "@End"           { beginCommand TcEndVBlock }
-  <command>            "("              { commandParamsBegin }
-  <command,params>     "("              { commandParamsInc }
-  <command,params>     ")"              { commandParamsDec }
-  <command,params>     "|"              { commandParamsSep }
-  <command,params>     @paramtext       { textBufferAppendInput }
+  <0> "@title"      { beginDirective TcTitle }
+  <0> "@date"       { beginDirective TcDate }
+  <0> "@h1"         { beginDirective TcH1 }
+  <0> "@h2"         { beginDirective TcH2 }
+  <0> "@h3"         { beginDirective TcH3 }
+  <0> "@h4"         { beginDirective TcH4 }
+  <0> "@h5"         { beginDirective TcH5 }
+  <0> "@h6"         { beginDirective TcH6 }
+  <0> "@link"       { beginDirective TcLink }
+  <0> "@reference"  { beginDirective TcReference }
+  <0> "@transclude" { beginDirective TcTransclude }
+  
+  <directive> "(" { beginParams }
+  
+  <directive,params> "("    { paramsInc }
+  <directive,params> ")"    { paramsDec }
+  <directive,params> "|"    { paramsSep }
+  <directive,params> @param { bufferAppendInput }
 
-  <0>                  "@{"             { beginCBlock }
-  <0>                  "@}"             { endCBlock }
+  <0> "$$"   { group Tex TcBeginTex TcEndTex }
+  <0> "**"   { group Bold TcBeginBold TcEndBold }
+  <0> "*"    { group Italics TcBeginItalics TcEndItalics }
+  <0> \n \n+ { group Paragraph TcBeginParagraph TcEndParagraph }
+  
+  <0> \n     { linebreak }
 
-  <0>                  "$$"             { beginLatex }
-  <latex>              "$$"             { endLatex }
-  <latex>              @latex           { textBufferAppendInput }
-  <latex>              "$"              { textBufferAppend "$" }
-
-  <0>                  "**"             { beginBold }
-  <bold>               "**"             { endBold }
-  <bold>               @bold            { textBufferAppendInput }
-  <bold>               "*"              { textBufferAppend "*" }
-
-  <0>                  "*"              { beginItalics }
-  <italics>            "*"              { endItalics }
-  <italics>            @italics         { textBufferAppendInput }
-
-  <0>                  \n\n             { paragraphBreak }
-  <0>                  \n               { lineBreak }
-  <0>                  @text            { textLiteral }
+  <0> @text { textLiteral }
 
 {
-beginCommand :: TokenClass -> AlexAction
-beginCommand tc _ ss _ = do
-  setStartCode command
-  pure $ Token ss tc 
-
-textBufferAppendInput,
-  commandParamsBegin, 
-  commandParamsInc, 
-  commandParamsDec, 
-  commandParamsSep, 
-  beginCBlock, 
-  endCBlock, 
-  beginLatex, 
-  endLatex, 
-  beginBold, 
-  endBold, 
-  beginItalics, 
-  endItalics, 
-  paragraphBreak, 
-  lineBreak, 
-  textLiteral :: AlexAction
-textBufferAppend :: T.Text -> AlexAction
-
-textBufferAppendInput input ss len = do
-  modifyTextBuffer ss (<> alexExcerpt input 0 len)
-  next 
-
-commandParamsBegin _ ss _ = do
-  setStartCode params
-  setParenDepth 1
-  pure $ Token ss TcBeginParams
-
-commandParamsInc _ ss _ = do
-  modifyParenDepth (+ 1)
-  modifyTextBuffer ss (<> "(")
+bufferAppendInput :: Lexlet
+bufferAppendInput alex tokenSpan length = do 
+  let excerpt = alexExcerpt alex 0 length 
+  modifyTextBuffer tokenSpan (<> excerpt)
   next
 
-commandParamsDec _ ss _ = do
-  modifyParenDepth $ \n -> n - 1 
-  getParenDepth >>= \case
-    0 -> do 
+beginDirective :: TokenClass -> Lexlet
+beginDirective tokenClass _ tokenSpan _ = do 
+  setStartCode directive 
+  pure $ Token tokenSpan tokenClass
+
+beginParams, paramsInc, paramsDec, paramsSep :: Lexlet
+beginParams _ tokenSpan _ = do
+  setStartCode params
+  pure $ Token tokenSpan TcBeginParameters
+
+paramsInc _ tokenSpan _ = do
+  pushGroup Parenthesis
+  modifyTextBuffer tokenSpan (<> "(")
+  next
+
+paramsDec _ tokenSpan _ = do
+  peekGroup >>= \case
+    Just Parenthesis -> do
+      _ <- popGroup
+      modifyTextBuffer tokenSpan (<> ")")
+      next
+    _ -> do
       setStartCode 0
       clearTextBuffer >>= \case
-        Just (bufferSpan, text) -> do
-          pushToken $ Token ss TcEndParams
-          pure . Token bufferSpan $ TcText text
-        Nothing -> pure $ Token ss TcEndParams
-    _ -> modifyTextBuffer ss (<> ")") *> next
+        Just (bufferSpan, bufferText) -> do
+          pushToken $ Token tokenSpan TcEndParameters
+          pure . Token bufferSpan $ TcText bufferText
+        Nothing -> pure $ Token tokenSpan TcEndParameters
 
-commandParamsSep AlexInput{..} ss _ = do 
-  -- In the future there might be a request to ignore
-  -- seperators within nested parentheses.
-  -- Fix: Only add seperators if the parenthesis depth 
-  -- is equal to 1, otherwise append a seperator to the 
-  -- text buffer.
-  clearTextBuffer >>= \case
-    Just (bufferSpan, text) -> do
-      pushToken $ Token ss TcParamsSep
-      pure . Token bufferSpan $ TcText text
-    Nothing -> failWith $ PeUnexpectedInput aSourcePos
+paramsSep AlexInput{..} tokenSpan _ = 
+  clearTextBuffer >>= \case 
+    Just (bufferSpan, bufferText) -> do
+      pushToken $ Token tokenSpan TcParameterSeparator
+      pure . Token bufferSpan $ TcText bufferText
+    Nothing -> throwError $ UnexpectedInput alexSourcePos
 
-beginCBlock _ ss _ = pure . Token ss $ TcBeginCBlock 
-endCBlock _ ss _ = pure . Token ss $ TcEndCBlock 
+linebreak :: Lexlet
+linebreak _ tokenSpan _ = pure $ Token tokenSpan TcLinebreak 
 
-beginLatex _ ss _ = setStartCode latex $> Token ss TcBeginLatex
+textLiteral :: Lexlet
+textLiteral alex tokenSpan length = 
+  pure . Token tokenSpan . TcText $ alexExcerpt alex 0 length
 
-endLatex AlexInput{..} ss _ = do
-  setStartCode 0
-  clearTextBuffer >>= \case
-    Just (bufferSpan, text) -> do
-      pushToken $ Token ss TcEndLatex 
-      pure . Token bufferSpan $ TcText text
-    Nothing -> failWith $ PeUnexpectedInput aSourcePos
+group :: ParseGroup -> TokenClass -> TokenClass -> Lexlet
+group parseGroup beginClass endClass _ tokenSpan _ = 
+  peekGroup >>= \case
+    Just pg | pg == parseGroup -> do
+      _ <- popGroup
+      pure $ Token tokenSpan endClass 
+    _ -> do
+      pushGroup parseGroup
+      pure $ Token tokenSpan beginClass 
 
-beginBold _ ss _ = setStartCode bold $> Token ss TcBeginBold
+scan :: Parse es => Eff es Token
+scan = do
+  alex <- get
+  code <- gets parseStartCode
+  case alexScan alex code of
+    AlexEOF -> do 
+      ((,) <$> popGroup <*> gets parseStartCode) >>= \case
+        (Just Paragraph, 0) -> 
+          pure $ Token (mkSourceSpan (alexSourcePos alex) (alexSourcePos alex)) TcEndParagraph
+        (Just pg, _) -> throwError $ UnterminatedGroup pg
+        (Nothing, 0) -> 
+          pure $ Token (mkSourceSpan (alexSourcePos alex) (alexSourcePos alex)) TcEof
+        (Nothing, _) -> throwError . UnexpectedEof $ alexSourcePos alex
+    AlexError alex' ->
+      if alexEof alex' 
+        then throwError . UnexpectedEof $ alexSourcePos alex'
+        else throwError . UnexpectedInput $ alexSourcePos alex'
+    AlexSkip alex' _ -> put alex' *> next
+    AlexToken alex' length lexlet -> do
+      tokenSpan <- mkSourceSpan 
+        <$> gets alexSourcePos <* put alex' 
+        <*> gets alexSourcePos
+      inject $ lexlet alex tokenSpan length
 
-endBold AlexInput{..} ss _ = do
-  setStartCode 0
-  clearTextBuffer >>= \case
-    Just (bufferSpan, text) -> do
-      pushToken $ Token ss TcEndBold 
-      pure . Token bufferSpan $ TcText text
-    Nothing -> failWith $ PeUnexpectedInput aSourcePos
-
-beginItalics _ ss _ = setStartCode italics $> Token ss TcBeginItalics
-
-endItalics AlexInput{..} ss _ = do
-  setStartCode 0
-  clearTextBuffer >>= \case
-    Just (bufferSpan, text) -> do
-      pushToken $ Token ss TcEndItalics 
-      pure . Token bufferSpan $ TcText text
-    Nothing -> failWith $ PeUnexpectedInput aSourcePos
-
-paragraphBreak _ ss _ = pure . Token ss $ TcParagraphBreak 
-lineBreak _ ss _ = pure . Token ss $ TcLineBreak 
-textLiteral input ss len = pure . Token ss . TcText $ alexExcerpt input 0 len
-textBufferAppend text _ ss _ = modifyTextBuffer ss (<> text) *> next
-
-scan :: Parser Token
-scan = do 
-  input <- getAlexInput
-  startCode <- getStartCode
-  case alexScan input startCode of
-    AlexEOF -> do
-      getStartCode >>= \case
-        0 -> getSourcePos <&> (\p -> Token (mkSourceSpan p p) TcEof)
-        _ -> failWith . PeUnexpectedEof $ aSourcePos input
-    AlexError input' -> 
-      if alexEOF input'
-        then failWith . PeUnexpectedEof $ aSourcePos input'
-        else failWith . PeUnexpectedInput $ aSourcePos input'
-    AlexSkip input' _ -> do
-      setAlexInput input'
-      next
-    AlexToken input' len action -> do
-      setAlexInput input'
-      sp <- getSourcePos
-      action input (mkSourceSpan (aSourcePos input') sp) len
-
-next :: Parser Token
+next :: Parse es => Eff es Token
 next = popToken >>= \case
-  Just t -> pure t
+  Just token -> pure token 
   Nothing -> scan
 
-lexFile :: MonadIO m => FilePath -> m (Either ParseError [Token])
+lexFile 
+  :: (Error ParseError :> es, IOE :> es) 
+  => FilePath 
+  -> Eff es [Token]
 lexFile path = do
   input <- liftIO $ LBS.readFile path
   let
     alexInput = AlexInput 0 (SourcePos path 1 1) input
-    parserState = ParserState alexInput 0 [] 0 Nothing
-  pure $ evalParser lexer parserState 
-  -- TODO: This doesnt add the EOF token
-  where lexer = unfoldWhileM (\t -> tokenClass t /= TcEof) next
-}
+    parseState = ParseState 0 mempty mempty Nothing
+  evalState parseState $ evalState alexInput go
+  where
+    go = next >>= \case 
+      eof@(Token _ TcEof) -> pure [eof]
+      token@_ -> (token :) <$> go
+ }

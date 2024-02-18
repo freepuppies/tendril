@@ -11,30 +11,28 @@ executable tendril
     main-is:          Main.hs
     other-modules:
         Data.Source,
-        Syntax,
-        Syntax.Parser.Token,
+        Syntax.Parser.Group,
         Syntax.Parser.Error,
+        Syntax.Parser.Token,
         Syntax.Parser.Internal,
-        Syntax.Parser.Lexer,
+        Syntax.Parser.Lexer
     build-depends:    
         base ^>=4.17.2.1,
-        mtl,
-        free,
+        effectful,
+        effectful-core,
+        effectful-plugin,
         text,
         array,
-        bytestring,
-        monad-loops,
-        pretty,
-        dhall
+        vector,
+        bytestring
     build-tool-depends:
         alex:alex,
         happy:happy
     default-extensions:
         RecordWildCards,
-        TupleSections,
-        BangPatterns,
-        MultiParamTypeClasses,
         LambdaCase,
-        OverloadedStrings
+        OverloadedStrings,
+        DataKinds
     hs-source-dirs:   app
-    default-language: Haskell2010
+    default-language: GHC2021
+    ghc-options: -fplugin=Effectful.Plugin
