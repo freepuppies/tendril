@@ -113,5 +113,5 @@ parseFile path = do
   let 
     alexInput = AlexInput 0 (SourcePos path 1 1) input
     parseState = ParseState 0 mempty mempty Nothing
-  evalState parseState $ evalState alexInput $ inject parseDocument
+  evalState parseState . evalState alexInput $ inject parseDocument
 }
