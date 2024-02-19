@@ -28,8 +28,9 @@ data TokenClass
   | TcEndItalics
   | TcBeginTex
   | TcEndTex
-  | TcBeginParagraph
-  | TcEndParagraph
+  | TcBeginParagraphs
+  | TcParagraphSeparator
+  | TcEndParagraphs
   | TcLinebreak
   | TcText !T.Text
   | TcEof

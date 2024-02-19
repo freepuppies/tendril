@@ -25,32 +25,43 @@ import Syntax.Parser.Lexer
 %errorhandlertype explist
 
 %token
-  title          { Token _ TcTitle }
-  date           { Token _ TcDate }
-  h1             { Token _ TcH1 }
-  h2             { Token _ TcH2 }
-  h3             { Token _ TcH3 }
-  h4             { Token _ TcH4 }
-  h5             { Token _ TcH5 }
-  h6             { Token _ TcH6 }
-  link           { Token _ TcLink }
-  reference      { Token _ TcReference }
-  transclude     { Token _ TcTransclude }
-  '('            { Token _ TcBeginParameters }
-  '|'            { Token _ TcParameterSeparator }
-  ')'            { Token _ TcEndParameters }
-  beginBold      { Token _ TcBeginBold }
-  endBold        { Token _ TcEndBold }
-  beginItalics   { Token _ TcBeginItalics }
-  endItalics     { Token _ TcEndItalics }
-  beginTex       { Token _ TcBeginTex }
-  endTex         { Token _ TcEndTex }
-  beginParagraph { Token _ TcBeginParagraph }
-  endParagraph   { Token _ TcEndParagraph }
-  linebreak      { Token _ TcLinebreak }
-  textLiteral    { Token _ (TcText _) }
+  title              { Token _ TcTitle }
+  date               { Token _ TcDate }
+  h1                 { Token _ TcH1 }
+  h2                 { Token _ TcH2 }
+  h3                 { Token _ TcH3 }
+  h4                 { Token _ TcH4 }
+  h5                 { Token _ TcH5 }
+  h6                 { Token _ TcH6 }
+  link               { Token _ TcLink }
+  reference          { Token _ TcReference }
+  transclude         { Token _ TcTransclude }
+  '('                { Token _ TcBeginParameters }
+  '|'                { Token _ TcParameterSeparator }
+  ')'                { Token _ TcEndParameters }
+  beginBold          { Token _ TcBeginBold }
+  endBold            { Token _ TcEndBold }
+  beginItalics       { Token _ TcBeginItalics }
+  endItalics         { Token _ TcEndItalics }
+  beginTex           { Token _ TcBeginTex }
+  endTex             { Token _ TcEndTex }
+  beginParagraphs    { Token _ TcBeginParagraphs }
+  paragraphSeparator { Token _ TcParagraphSeparator }
+  endParagraphs      { Token _ TcEndParagraphs }
+  linebreak          { Token _ TcLinebreak }
+  textLiteral        { Token _ (TcText _) }
 
 %%
+
+snd(p,q) : p q { $2 }
+
+opt(p) : p { Just $1 } 
+       |   { Nothing }
+
+sep1(p,q) : p list(snd(q,p)) { $1 : $2 }
+
+sep(p,q) : p sep1(p,q) { $1 : $2 }   
+         | p           { [$1] }
 
 list1(p) : p list1(p) { [$1] ++ $2 }
          | p          { [$1] }
@@ -61,6 +72,7 @@ list(p) : list1(p) { $1 }
 text : textLiteral { (\(Token tokenSpan (TcText t)) -> Node tokenSpan (NcText t) []) $1 }
 
 command1(p) : p '(' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $4) nc [$3] }
+
 command2(p) : p '(' text '|' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $6) nc [$3, $5] }
 
 command : command1(title)      { $1 NcTitle }
@@ -79,13 +91,16 @@ command : command1(title)      { $1 NcTitle }
         | command1(transclude) { $1 NcTransclude }
 
 bold : beginBold scripts1 endBold { Node (tokenSpan $1 <> tokenSpan $3) NcBold $2 }
+
 italics : beginItalics scripts1 endItalics { Node (tokenSpan $1 <> tokenSpan $3) NcItalics $2 }
+
 tex : beginTex scripts1 endTex { Node (tokenSpan $1 <> tokenSpan $3) NcTex $2 }
 
 script : bold    { $1 }
        | italics { $1 }
        | tex     { $1 }
        | text    { $1 }
+
 scripts1 : list1(script) { $1 }
 
 paragraphItem : script               { $1 }
@@ -93,12 +108,18 @@ paragraphItem : script               { $1 }
               | command1(link)       { $1 NcLink }
               | command2(reference)  { $1 NcReference }
               | command1(reference)  { $1 NcReference }
-paragraph : beginParagraph list1(paragraphItem) endParagraph { Node (tokenSpan $1 <> tokenSpan $3) NcParagraph $2 }
 
-documentItem : command   { $1 }
-             | paragraph { $1 }
+paragraphItems : list(paragraphItem) { $1 }
 
-document : list(documentItem) { $1 }
+paragraphsTail : paragraphItems opt(paragraphSeparator) endParagraphs { \beginSpan -> [Node (beginSpan <> tokenSpan $3) NcParagraph $1] }
+               | paragraphItems paragraphSeparator paragraphsTail     { \beginSpan -> [Node (beginSpan <> tokenSpan $2) NcParagraph $1] ++ $3 beginSpan }
+
+paragraphs : beginParagraphs paragraphsTail { $2 (tokenSpan $1) }
+
+documentItems : list1(command) { $1 }
+              | paragraphs     { $1 }
+
+document : list(documentItems) { mconcat $1 }
 
 {
 parseError :: (Token, [String]) -> Parser a 
@@ -108,7 +129,7 @@ parseFile
   :: (Error ParseError :> es, IOE :> es)
   => FilePath
   -> Eff es [Node]
-parseFile path = do
+parseFile path = do  
   input <- liftIO $ LBS.readFile path
   let 
     alexInput = AlexInput 0 (SourcePos path 1 1) input

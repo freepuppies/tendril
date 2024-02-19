@@ -31,17 +31,17 @@ import Prelude hiding (length)
 @text     = @textelem+
 
 tokens :-
-  <0> "@title"      { beginDirective TcTitle }
-  <0> "@date"       { beginDirective TcDate }
-  <0> "@h1"         { beginDirective TcH1 }
-  <0> "@h2"         { beginDirective TcH2 }
-  <0> "@h3"         { beginDirective TcH3 }
-  <0> "@h4"         { beginDirective TcH4 }
-  <0> "@h5"         { beginDirective TcH5 }
-  <0> "@h6"         { beginDirective TcH6 }
-  <0> "@link"       { beginDirective TcLink }
-  <0> "@reference"  { beginDirective TcReference }
-  <0> "@transclude" { beginDirective TcTransclude }
+  <0> "@title"      { beginDirective TcTitle True }
+  <0> "@date"       { beginDirective TcDate True }
+  <0> "@h1"         { beginDirective TcH1 True }
+  <0> "@h2"         { beginDirective TcH2 True }
+  <0> "@h3"         { beginDirective TcH3 True }
+  <0> "@h4"         { beginDirective TcH4 True }
+  <0> "@h5"         { beginDirective TcH5 True }
+  <0> "@h6"         { beginDirective TcH6 True }
+  <0> "@link"       { beginDirective TcLink False }
+  <0> "@reference"  { beginDirective TcReference False }
+  <0> "@transclude" { beginDirective TcTransclude False }
   
   <directive> "(" { beginParams }
   
@@ -55,7 +55,7 @@ tokens :-
   <0> "*"    { group Italics TcBeginItalics TcEndItalics }
   <0> \n \n+ { paragraphGroup }
   
-  <0> \n     { linebreak }
+  <0> \n { linebreak }
 
   <0> @text { textLiteral }
 
@@ -66,10 +66,15 @@ bufferAppendInput alex tokenSpan length = do
   modifyTextBuffer tokenSpan (<> excerpt)
   next
 
-beginDirective :: TokenClass -> Lexlet
-beginDirective tokenClass _ tokenSpan _ = do 
+beginDirective :: TokenClass -> Bool -> Lexlet
+beginDirective tokenClass breakParagraphs AlexInput{..} tokenSpan _ = do 
   setStartCode directive 
-  pure $ Token tokenSpan tokenClass
+  peekGroup >>= \case
+    Just Paragraph | breakParagraphs == True -> do
+      _ <- popGroup 
+      pushToken $ Token tokenSpan tokenClass
+      pure $ Token (mkSourceSpan alexSourcePos alexSourcePos) TcEndParagraphs
+    _ -> pure $ Token tokenSpan tokenClass
 
 beginParams, paramsInc, paramsDec, paramsSep :: Lexlet
 beginParams _ tokenSpan _ = do
@@ -120,16 +125,17 @@ group parseGroup beginClass endClass _ tokenSpan _ =
       pure $ Token tokenSpan beginClass 
 
 paragraphGroup :: Lexlet
-paragraphGroup alex tokenSpan _ = 
+paragraphGroup _ tokenSpan _ = 
   peekGroup >>= \case
     Just Paragraph -> do
       alexEof <$> get >>= \case 
-        True -> void popGroup
-        False -> pushToken $ Token tokenSpan TcBeginParagraph
-      pure $ Token tokenSpan TcEndParagraph
+        True -> do 
+          _ <- popGroup
+          pure $ Token tokenSpan TcEndParagraphs
+        False -> pure $ Token tokenSpan TcParagraphSeparator
     _ -> do
       pushGroup Paragraph
-      pure $ Token tokenSpan TcBeginParagraph
+      pure $ Token tokenSpan TcBeginParagraphs
 
 scan :: Parse es => Eff es Token
 scan = do
@@ -139,7 +145,7 @@ scan = do
     AlexEOF -> do 
       ((,) <$> popGroup <*> gets parseStartCode) >>= \case
         (Just Paragraph, 0) -> 
-          pure $ Token (mkSourceSpan (alexSourcePos alex) (alexSourcePos alex)) TcEndParagraph
+          pure $ Token (mkSourceSpan (alexSourcePos alex) (alexSourcePos alex)) TcEndParagraphs
         (Just pg, _) -> throwError $ UnterminatedGroup pg
         (Nothing, 0) -> 
           pure $ Token (mkSourceSpan (alexSourcePos alex) (alexSourcePos alex)) TcEof
