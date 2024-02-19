@@ -53,15 +53,8 @@ import Syntax.Parser.Lexer
 
 %%
 
-snd(p,q) : p q { $2 }
-
 opt(p) : p { Just $1 } 
        |   { Nothing }
-
-sep1(p,q) : p list(snd(q,p)) { $1 : $2 }
-
-sep(p,q) : p sep1(p,q) { $1 : $2 }   
-         | p           { [$1] }
 
 list1(p) : p list1(p) { [$1] ++ $2 }
          | p          { [$1] }
