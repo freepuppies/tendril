@@ -4,7 +4,9 @@ module Syntax.Parser
   )
 where 
 
+import Control.Monad
 import Data.ByteString.Lazy qualified as LBS
+import Data.Sequence
 import Data.Source
 import Effectful
 import Effectful.Error.Static
@@ -56,17 +58,17 @@ import Syntax.Parser.Lexer
 opt(p) : p { Just $1 } 
        |   { Nothing }
 
-list1(p) : p list1(p) { [$1] ++ $2 }
-         | p          { [$1] }
+seq1(p) : p seq1(p) { $1 <| $2 }
+        | p         { singleton $1 }
 
-list(p) : list1(p) { $1 }
-        |          { [] }
+seq(p) : seq1(p) { $1 }
+       |         { mempty }
 
-text : textLiteral { (\(Token tokenSpan (TcText t)) -> Node tokenSpan (NcText t) []) $1 }
+text : textLiteral { (\(Token tokenSpan (TcText t)) -> Node tokenSpan (NcText t) mempty) $1 }
 
-command1(p) : p '(' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $4) nc [$3] }
+command1(p) : p '(' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $4) nc (singleton $3) }
 
-command2(p) : p '(' text '|' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $6) nc [$3, $5] }
+command2(p) : p '(' text '|' text ')' { \nc -> Node (tokenSpan $1 <> tokenSpan $6) nc ($3 <| $5 <| mempty) }
 
 command : command1(title)      { $1 NcTitle }
         | command1(date)       { $1 NcDate }
@@ -94,7 +96,7 @@ script : bold    { $1 }
        | tex     { $1 }
        | text    { $1 }
 
-scripts1 : list1(script) { $1 }
+scripts1 : seq1(script) { $1 }
 
 paragraphItem : script               { $1 }
               | command2(link)       { $1 NcLink }
@@ -102,17 +104,17 @@ paragraphItem : script               { $1 }
               | command2(reference)  { $1 NcReference }
               | command1(reference)  { $1 NcReference }
 
-paragraphItems : list(paragraphItem) { $1 }
+paragraphItems : seq(paragraphItem) { $1 }
 
-paragraphsTail : paragraphItems opt(paragraphSeparator) endParagraphs { \beginSpan -> [Node (beginSpan <> tokenSpan $3) NcParagraph $1] }
-               | paragraphItems paragraphSeparator paragraphsTail     { \beginSpan -> [Node (beginSpan <> tokenSpan $2) NcParagraph $1] ++ $3 beginSpan }
+paragraphsTail : paragraphItems opt(paragraphSeparator) endParagraphs { \beginSpan -> singleton (Node (beginSpan <> tokenSpan $3) NcParagraph $1) }
+               | paragraphItems paragraphSeparator paragraphsTail     { \beginSpan -> Node (beginSpan <> tokenSpan $2) NcParagraph $1 <| $3 beginSpan }
 
 paragraphs : beginParagraphs paragraphsTail { $2 (tokenSpan $1) }
 
-documentItems : list1(command) { $1 }
-              | paragraphs     { $1 }
+documentItems : seq1(command) { $1 }
+              | paragraphs    { $1 }
 
-document : list(documentItems) { mconcat $1 }
+document : seq(documentItems) { join $1 }
 
 {
 parseError :: (Token, [String]) -> Parser a 
@@ -121,7 +123,7 @@ parseError = throwError . uncurry UnexpectedToken
 parseFile 
   :: (Error ParseError :> es, IOE :> es)
   => FilePath
-  -> Eff es [Node]
+  -> Eff es (Seq Node)
 parseFile path = do  
   input <- liftIO $ LBS.readFile path
   let 

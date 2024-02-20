@@ -4,6 +4,7 @@ module Syntax
   )
 where
 
+import Data.Sequence (Seq)
 import Data.Source (SourceSpan)
 import Data.Text qualified as T
 
@@ -27,8 +28,8 @@ data NodeClass
   deriving (Show)
 
 data Node = Node
-  { nodeSpan :: !SourceSpan
-  , nodeClass :: !NodeClass
-  , nodeChildren :: ![Node]
+  { nodeSpan :: SourceSpan
+  , nodeClass :: NodeClass
+  , nodeChildren :: Seq Node
   }
   deriving (Show)
