@@ -1,6 +1,6 @@
-module Document.Config
+module Dossier.Document.Config
   ( DocumentConfig (..)
-  , readDocumentConfig
+  , readOrDefault
   )
 where
 
@@ -11,8 +11,8 @@ import Dhall (input)
 import Dhall.Marshal.Decode qualified as D
 import Dhall.Marshal.Encode qualified as E
 import Effectful
-import Effectful.FileSystem (doesFileExist)
-import Effectful.FileSystem.IO
+import Effectful.FileSystem
+import Prelude hiding (readFile)
 
 data DocumentConfig = DocumentConfig
   { dcCss :: Maybe T.Text
@@ -53,8 +53,8 @@ encodeDocumentConfig = E.recordEncoder encoder
 
 -- | Attempts to read a @DocumentConfig@ from the provided path.
 -- If the file doesn't exist, an empty @DocumentConfig@ will be returned.
-readDocumentConfig :: (IOE :> es, FileSystem :> es) => FilePath -> Eff es DocumentConfig
-readDocumentConfig path =
+readOrDefault :: (IOE :> es, FileSystem :> es) => FilePath -> Eff es DocumentConfig
+readOrDefault path =
   doesFileExist path >>= \case
     True -> liftIO $ T.readFile path >>= input decodeDocumentConfig
     False -> pure mempty

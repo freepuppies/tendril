@@ -5,10 +5,11 @@ module Syntax.Parser
 where 
 
 import Control.Monad
-import Data.ByteString.Lazy qualified as LBS
 import Data.Sequence
 import Data.Source
 import Effectful
+import Effectful.FileSystem
+import Effectful.FileSystem.IO.ByteString.Lazy
 import Effectful.Error.Static
 import Effectful.State.Static.Local
 import Syntax
@@ -16,6 +17,7 @@ import Syntax.Parser.Error
 import Syntax.Parser.Internal
 import Syntax.Parser.Token
 import Syntax.Parser.Lexer
+import Prelude hiding (readFile)
 }
 
 %name parseDocument document 
@@ -121,11 +123,11 @@ parseError :: (Token, [String]) -> Parser a
 parseError = throwError . uncurry UnexpectedToken
 
 parseFile 
-  :: (Error ParseError :> es, IOE :> es)
+  :: (Error ParseError :> es, FileSystem :> es)
   => FilePath
   -> Eff es (Seq Node)
 parseFile path = do  
-  input <- liftIO $ LBS.readFile path
+  input <- readFile path
   let 
     alexInput = AlexInput 0 (SourcePos path 1 1) input
     parseState = ParseState 0 mempty mempty Nothing

@@ -11,13 +11,23 @@ executable tendril
     main-is:          Main.hs
     other-modules:
         Data.Source,
+        Dossier,
+        Dossier.Document,
+        Dossier.Document.Config,
+        Dossier.DocumentTree,
         Syntax,
         Syntax.Parser,
         Syntax.Parser.Group,
         Syntax.Parser.Error,
         Syntax.Parser.Token,
         Syntax.Parser.Internal,
-        Syntax.Parser.Lexer
+        Syntax.Parser.Lexer,
+        Eval,
+        Eval.Error,
+        Render,
+        Render.Error,
+        Render.Settings,
+        Render.Latex
     build-depends:    
         base ^>=4.17.2.1,
         effectful,
@@ -26,7 +36,14 @@ executable tendril
         text,
         array,
         vector,
-        bytestring
+        bytestring,
+        containers,
+        unordered-containers,
+        composition,
+        filepath,
+        dhall,
+        blaze-html,
+        optparse-applicative
     build-tool-depends:
         alex:alex,
         happy:happy
@@ -34,7 +51,9 @@ executable tendril
         RecordWildCards,
         LambdaCase,
         OverloadedStrings,
-        DataKinds
+        DataKinds,
+        TypeFamilies,
+        BlockArguments
     hs-source-dirs:   app
     default-language: GHC2021
     ghc-options: -fplugin=Effectful.Plugin
