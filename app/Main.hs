@@ -21,19 +21,19 @@ main = do
     _ <- eval ("index" :<| Empty)
     render
 
-  case result of 
+  case result of
     Left (_, e) -> print e
     Right (Left (_, e)) -> print e
-    Right (Right (Left (_, e))) -> print e 
+    Right (Right (Left (_, e))) -> print e
     Right (Right (Right (_, _))) -> putStrLn "done!"
-  
   where
-    run = runEff 
-      . runFileSystem 
-      . runTemporary 
-      . runProcess 
-      . runError @ParseError 
-      . runError @EvalError 
-      . runError @RenderError 
-      . runDossier mempty 
-      . runReader (RenderSettings ".tendril" "static" "resources")
+    run =
+      runEff
+        . runFileSystem
+        . runTemporary
+        . runProcess
+        . runError @ParseError
+        . runError @EvalError
+        . runError @RenderError
+        . runDossier mempty
+        . runReader (RenderSettings ".tendril" "static" "resources")
