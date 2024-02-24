@@ -3,6 +3,8 @@
 :root {
   --body-color: rgb(25, 26, 25);
   --body-bg-color: rgb(241, 242, 235);
+  --link-color: rgb(164, 194, 165);
+  --link-visted-color: rgb(86, 98, 70);
 }
 
 body, 
@@ -77,6 +79,19 @@ p {
   -webkit-hyphens: auto;
   -moz-hyphens: auto;
   margin-top: 1rem;
+}
+
+a {
+  color: var(--link-color);
+}
+
+a:visted {
+  color: var(--link-visited-color);
+}
+
+a:focus {
+  outline-offset: 2px;
+  outline: 2px solid var(--link-focus-outline);
 }
 
 .tex {
