@@ -5,6 +5,7 @@
   --body-bg-color: rgb(241, 242, 235);
   --link-color: rgb(164, 194, 165);
   --link-visted-color: rgb(86, 98, 70);
+  --link-focus-outline-color: rgb(74, 74, 72);
 }
 
 body, 
@@ -91,7 +92,7 @@ a:visted {
 
 a:focus {
   outline-offset: 2px;
-  outline: 2px solid var(--link-focus-outline);
+  outline: 2px solid var(--link-focus-outline-color);
 }
 
 .tex {
