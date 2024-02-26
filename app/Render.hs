@@ -3,7 +3,7 @@ module Render
   )
 where
 
-import Data.Foldable (traverse_)
+import Data.Foldable (traverse_, toList)
 import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq (..))
@@ -22,7 +22,7 @@ import Effectful.Temporary
 import Render.Error (RenderError)
 import Render.Latex (renderLatexFormula)
 import Render.Settings (RenderSettings (RenderSettings))
-import System.FilePath (dropExtension, takeFileName, (-<.>), (</>))
+import System.FilePath (dropExtension, takeFileName, (-<.>), (</>), takeDirectory)
 import Text.Blaze.Html.Renderer.Utf8 (renderHtml)
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -54,8 +54,8 @@ objectHtml (D.Object sourceSpan class_ children) =
       -- TODO: This is gross, find another way
       let
         docPath = D.path doc
-        docUrl = ("/" <>) . (-<.> "html") . T.unpack $ foldr (\l r -> l <> "/" <> r) mempty docPath
-      pure $ H.a H.! A.href (H.stringValue docUrl) $ H.string . dropExtension $ takeFileName docUrl
+        docUrl = ("/" <>) . (-<.> "html") . T.unpack . T.intercalate "/" $ toList docPath
+      pure $ H.a H.! A.href (H.stringValue docUrl) $ H.string . dropExtension $ takeFileName docUrl 
     -- Scripts
     (D.OcBold, _) -> traverse objectHtml children <&> H.b . sequence_
     (D.OcItalics, _) -> traverse objectHtml children <&> H.i . sequence_
@@ -93,7 +93,7 @@ renderDocument (D.Document (D.Frontmatter docPath title date) config body) = do
         H.body $ do
           sequence_ objects
       htmlPath = staticDir </> D.toFilePath docPath -<.> "html"
-  createDirectoryIfMissing True staticDir
+  createDirectoryIfMissing True $ takeDirectory htmlPath
   withFile htmlPath WriteMode $ flip hPutStrLn html
 
 render
