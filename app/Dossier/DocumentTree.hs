@@ -6,11 +6,13 @@ module Dossier.DocumentTree
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.Composition ((.:))
 import Data.HashMap.Strict qualified as H
 import Data.Sequence (Seq (..))
 import Data.Text qualified as T
 import Dossier.Document qualified as D
+import Dossier.Document.Config qualified as DC
 import Prelude hiding (lookup)
 
 data DocumentTree = DocumentNode
@@ -21,7 +23,16 @@ data DocumentTree = DocumentNode
 
 instance Semigroup DocumentTree where
   (DocumentNode docs sub) <> (DocumentNode docs' sub') =
-    DocumentNode (docs <> docs') (H.unionWith (<>) sub sub')
+    DocumentNode root unionSub'
+    where
+      root = docs <> docs'
+      unionSub = H.unionWith (<>) sub sub'
+      intersectionSub = H.intersectionWith (\tree doc -> configTower (D.docConfig doc) tree) unionSub root
+      unionSub' = intersectionSub `H.union` unionSub
+      configTower cfg (DocumentNode docs'' sub'') =
+        DocumentNode
+          ((\d -> d{D.docConfig = D.docConfig d <> cfg}) <$> docs'')
+          (configTower cfg <$> sub'')
 
 instance Monoid DocumentTree where
   mempty = DocumentNode mempty mempty
